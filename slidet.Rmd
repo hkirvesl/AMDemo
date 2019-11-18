@@ -1,0 +1,167 @@
+---
+title: Primer on Animal Models
+
+output: 
+  revealjs::revealjs_presentation:
+    theme: night
+    highlight: espresso
+    center: true
+    transition: none
+    fig_caption: true
+    reveal_options:
+      progress: true
+      slideNumber: true
+      
+  
+---
+
+
+
+
+## Mixed effects models
+
+For individual $i$ in group $j=1,\ldots, J$, a mixed effects model with $Z \subset X$: 
+
+$$
+Y_{ij} = X_{ij} \beta + Z_{ij}b_j + \epsilon_{ij},
+$$
+
+The standard setup:
+
+$b_j \sim^{iid} N(0, \Sigma_b) \perp \epsilon_{ij}$
+
+
+```{r, echo=TRUE, eval=FALSE}
+m1 <- brm(Y ~ (1|group), data = data)
+```
+
+
+## Animal Model
+
+
+Now let us introduce across-group correlation between the coefficients by introducing a similarity matrix $\Psi$:
+
+$b \sim N(0, \Sigma_b \otimes\Psi_{J \times J}) \perp \epsilon_{ij}.$
+
+In Case Study 1 we used this strategy with $\Psi$ derived from the Graph Laplacian. These models are used in ecology (phylogenetics, animal breeding) and they go by the name *animal model*.
+
+```{r, echo=FALSE, message=FALSE}
+library(brms)
+library(MCMCglmm)
+```
+
+```{r, echo=TRUE, eval=FALSE}
+m1 <- brm(Y ~ (1|group), data = data, cov_ranef = list(group = Psi))
+```
+
+## Heritability
+
+Let $Y$ be a phenotype (variable of interest) in population $P$.
+
+The variance of $Y$ splits into three components:
+
+$$
+V_Y= \underbrace{V_E}_{\textrm{Environmental}} + \underbrace{V_{A}}_{\textrm{Genetic Additive}} + \underbrace{V_{NA}}_{\textrm{Genetic Non-Additive}},
+$$
+
+The *heritability* $h^2$ of $Y$ in population $P$ is
+
+$$
+h^2 = \frac{V_A}{V_Y},
+$$
+and the *breeding value* of individual $i$ is
+
+$$
+(Y_{ij}- \bar{Y})h^2.
+$$
+
+- Breeding value tells us the value of using subject $i$ as a parent if we are interested in producing offsprings with higher value of $Y$.
+
+## Heritability
+
+- Can be obtained as the regression coefficient of parent-offspring regression:
+```{r, echo=FALSE, results='hide'}
+data=read.csv("data/testi.csv")
+data2=data[complete.cases(data),]
+kissa=lm(Phenotype~MeanParent,data=data2)
+summary(kissa)
+```
+
+```{r, echo=FALSE}
+plot(data2$Phenotype~data2$MeanParent, xlab="Phenotype, Mean Parent", ylab="Phenotype, Offspring")
+abline(a=kissa$coefficients[1],b=kissa$coefficients[2])
+```
+
+- Usually better idea (as shown by de Villemereuil et al. 2012) is to use animal models
+
+## The pedigree matrix
+
+The similarity matrix $\Psi$ is obtained as follows:
+List the animals $a_i= a_1,\ldots, a_N$ monotonically by generations. For $j \le i$, and parents $p_1[i],p_2[i]$.
+
+If both $p_1[i], p_2[i]$ are observed:
+$\Psi_{i,j} = \Psi_{j,i} = \frac{1}{2} ( \Psi_{j, p_1[i]} + \Psi_{j, p_2[i]} )$ and $\Psi_{i,i} = 1 + \frac{1}{2} \Psi_{p_1[i],p_2[j]}$.
+
+
+If only $p_1[i]$ is observed:
+
+$\Psi_{i,j} = \Psi_{j,i} = \Psi_{j, p_1[i]}$, $\Psi_{i,i}=1$.
+
+Otherwise:
+
+$\Psi_{i,j}=\Psi_{j,i}=0$ and $\Psi_{i,i}=1$.
+
+
+## The pedigree matrix
+
+R can do this automatically:
+```{r, echo=FALSE}
+Pedigree=data[,c(1,2,3)]
+```
+
+```{r, echo=TRUE}
+Pedigree[1:10,]
+```
+
+```{r, echo=TRUE, results='hide'}
+inv.Psi <- MCMCglmm::inverseA(Pedigree)
+Psi <- solve(inv.Psi$Ainv)
+rownames(Psi) <- rownames(inv.Psi$Ainv)
+```
+
+
+## Fitting the models
+
+$$
+P_{i} = \beta_0 + b_i + \epsilon_i,
+$$
+$$
+\epsilon_i \sim^{iid} N(0, \sigma^2) \perp b \sim N(0, \sigma_b^2\Psi),
+$$
+where $\Psi$ is the pedigree matrix
+
+
+
+```{r, eval=FALSE, results='hide'}
+m1 <- brm(Phenotype ~ (1|Individual), data = data, 
+          family = "gaussian", cov_ranef = list(Individual = Psi), control = list(adapt_delta = 0.99), prior = c(brms::prior(normal(0, 1), class = Intercept),
+                            brms::prior(cauchy(0, 1), class = sd),
+                            brms::prior(cauchy(0, 1), class = sigma)),warmup = 6000, iter = 26000)
+```
+
+- With this setup, the random effects $b_i$ are the breeding values.
+- Heritability $h^2$ is obtained by $\frac{\sigma_b^2}{\sigma_b^2+\sigma^2}$
+- In this example we have only one predictor in the model, but can and should use all the data we have
+
+## Takeaways
+
+- Now that you know mixed effects models you can with very modest effort do animal models
+- This kind of thinking can be applied elsewhere
+- brms can do this easily, but lm4 can not. There are many other packages in R that can do that in frequentist setting
+
+## Acknowledgements & Reading:
+
+- Slide layout: Amy Herring, STA410/STA610 Fall 2019, Duke University
+- Code for automatically getting pedigree matrix: https://github.com/JonBrommer/Multivariate-Mixed-Models-in-R/wiki/brms-examples
+- More on animal models: Guilherme J. M. Rosa: https://www.biostat.washington.edu/sites/default/files/modules/Seattle-SISG-18-MM-Lecture04.pdf
+- de Villemereuil, Gimenez, Doligez: Comparing parent-offspring regression with frequentist and Bayesian animal models to estimate heritability in wild populations: A simulation study for Gaussian and binary traits, Methods in Ecology and Evolution 2013
